@@ -9,9 +9,11 @@ from material import *
 from transform import *
 from node import *
 from scene import *
-from sphere import *
+# Importação alterada: Usando Cube em vez de Sphere
+from cube import * # Certifique-se de que o módulo cube.py esteja disponível e defina uma classe Cube
 
-viewer_pos = glm.vec3(2.0, 3.5, 4.0)
+# Posição da câmera (ligeiramente ajustada para um novo ângulo)
+viewer_pos = glm.vec3(3.0, 4.0, 5.0) 
 
 def main():
     if not glfw.init():
@@ -22,7 +24,7 @@ def main():
     glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
     glfw.window_hint(glfw.OPENGL_FORWARD_COMPAT, GL_TRUE)
 
-    win = glfw.create_window(640, 480, "Reflexão Planar com Stencil", None, None)
+    win = glfw.create_window(800, 600, "Reflexão Planar com Stencil e Cubo", None, None) # Aumentei o tamanho da janela
     if not win:
         glfw.terminate()
         return
@@ -44,7 +46,8 @@ def main():
 def initialize(win):
     global camera, scene, shader, plane_shader, plane_vao, plane_vbo
 
-    glClearColor(0.2, 0.4, 0.6, 1.0)
+    # Nova cor de fundo: Cinza claro (0.8, 0.8, 0.8, 1.0)
+    glClearColor(0.8, 0.8, 0.8, 1.0) 
     glEnable(GL_DEPTH_TEST)
     glEnable(GL_CULL_FACE)
     glEnable(GL_STENCIL_TEST)
@@ -54,7 +57,9 @@ def initialize(win):
     arcball.Attach(win)
 
     light = Light(viewer_pos[0], viewer_pos[1], viewer_pos[2], 1.0, "camera")
-    red = Material(1.0, 0.5, 0.5)
+    
+    # Novo material: Verde Esmeralda (0.1, 0.8, 0.5)
+    emerald_green = Material(0.1, 0.8, 0.5) 
 
     shader = Shader(light, "camera")
     shader.AttachVertexShader("shaders/vertex.glsl")
@@ -67,20 +72,24 @@ def initialize(win):
     plane_shader.Link()
 
     transform = Transform()
-    transform.Scale(0.25, 0.25, 0.25)
-    transform.Translate(-0.7, 2.8, 0.0)
-    sphere = Sphere()
+    # Ajustei a escala e a posição do cubo
+    transform.Scale(0.5, 0.5, 0.5) 
+    transform.Translate(-1.0, 0.5, 0.0) 
+    
+    # Objeto alterado: De Sphere para Cube
+    cube = Cube() 
 
     root = Node(shader, nodes=[
-        Node(None, transform, [red], [sphere])
+        Node(None, transform, [emerald_green], [cube])
     ])
     scene = Scene(root)
 
+    # Ajustei o tamanho do plano para ser um pouco maior
     plane_vertices = np.array([
-        -5.0, 0.0, -5.0,
-         5.0, 0.0, -5.0,
-         5.0, 0.0,  5.0,
-        -5.0, 0.0,  5.0
+        -8.0, 0.0, -8.0,
+         8.0, 0.0, -8.0,
+         8.0, 0.0,  8.0,
+        -8.0, 0.0,  8.0
     ], dtype=np.float32)
 
     plane_vao = glGenVertexArrays(1)
@@ -100,26 +109,32 @@ def display(win):
 
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT)
 
-    # Desenhar o refletor no stencil
+    # 1. Desenhar o refletor no stencil (desativa escrita no buffer de cor/profundidade)
     glEnable(GL_STENCIL_TEST)
     glStencilFunc(GL_NEVER, 1, 0xFF)
     glStencilOp(GL_REPLACE, GL_REPLACE, GL_REPLACE)
+    glDepthMask(GL_FALSE) # Não escreve no buffer de profundidade
+    glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE) # Não escreve no buffer de cor
     render_plane()
-    glDisable(GL_STENCIL_TEST)
+    glDepthMask(GL_TRUE)
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE)
 
-    # Renderizar cena refletida
+    # 2. Renderizar cena refletida
     glEnable(GL_STENCIL_TEST)
     glStencilFunc(GL_EQUAL, 1, 0xFF)
     glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP)
+    glEnable(GL_DEPTH_TEST) # Habilitar teste de profundidade para a cena refletida
     render_reflected_scene()
     glDisable(GL_STENCIL_TEST)
 
-    # Renderizar a cena original
+    # 3. Renderizar a cena original (objeto acima do plano)
     render_scene()
 
-    # Renderizar o plano refletor com blending
+    # 4. Renderizar o plano refletor com blending/transparência
     glEnable(GL_BLEND)
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+    # Aqui, a cor do plano (com transparência) deve ser definida no seu 'plane_fragment.glsl'
+    # Ex: vec4(0.3, 0.5, 0.9, 0.5); // Azul claro e 50% transparente
     render_plane()
     glDisable(GL_BLEND)
 
@@ -144,7 +159,7 @@ def render_reflected_scene():
     reflection_matrix = glm.mat4(1.0)
     reflection_matrix[1][1] = -1.0  # Inverte a coordenada Y
 
-    # Inverter a orientação das faces para a reflexão
+    # Inverter a orientação das faces para a reflexão (para que o culling funcione corretamente)
     glFrontFace(GL_CW)
 
     # Renderizar a cena refletida com a matriz de reflexão
