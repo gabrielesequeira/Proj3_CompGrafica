@@ -3,10 +3,10 @@
 in vec4 color;
 in vec3 vNormal;
 in vec3 vEye;
-in vec2 vTexcoord;  // Receber coordenadas de textura
+in vec2 vTexcoord;
 
-uniform sampler2D decal;  // Amostra de textura
-uniform bool useTexture;  // Novo uniforme para decidir entre textura e cor
+uniform sampler2D decal;
+uniform bool useTexture;
 
 uniform vec4 lpos;
 uniform vec4 lamb;
@@ -36,8 +36,8 @@ void main(void) {
 
     vec4 spec = vec4(0.0);
     if (NdotL > 0.0) {
-        vec3 viewDir = normalize(-vEye);       // Direção do observador
-        vec3 reflectDir = reflect(-lightDir, N); // Reflete a luz em relação à normal
+        vec3 viewDir = normalize(-vEye);
+        vec3 reflectDir = reflect(-lightDir, N);
         float RdotV = max(dot(reflectDir, viewDir), 0.0);
         spec = mspe * lspe * pow(RdotV, mshi);
     }
@@ -45,9 +45,9 @@ void main(void) {
     vec4 ambient = mamb * lamb;
 
     // Verifica se usa textura ou cor
-    vec4 baseColor = color;  // Usar cor por padrão
+    vec4 baseColor = color;
     if (useTexture) {
-        baseColor = texture(decal, vTexcoord);  // Substitui pela textura se estiver ativa
+        baseColor = texture(decal, vTexcoord);
     }
 
     // Combina a iluminação com a cor/textura
