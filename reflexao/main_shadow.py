@@ -140,69 +140,80 @@ def display_shadows(win):
     # 3. Renderizar a cena original (cubo iluminado)
     render_scene()
 
-def create_shadow_projection_matrix(plane_normal, plane_point, light_pos_vec3):
+def create_shadow_projection_matrix(plane_normal, plane_point, light_pos_vec3, light_w=1.0):
     """
-    Cria a matriz de projeção de sombra sobre um plano.
-    Formula: S = (L.N) * I - L * N^T  (onde N é (A,B,C,D) nos coeficientes do plano)
-    Aqui usamos vetor plano_coeffs = (A, B, C, D) com D = -dot(N.xyz, point_on_plane)
+    Retorna a matriz 4x4 que projeta pontos sobre o plano definido por (plane_normal, plane_point).
     """
-    # Construir coeficientes do plano (A,B,C,D)
+    # coeficientes do plano ax + by + cz + d = 0
     A = plane_normal.x
     B = plane_normal.y
     C = plane_normal.z
     D = - (A * plane_point.x + B * plane_point.y + C * plane_point.z)
 
-    plane_coeffs = glm.vec4(A, B, C, D)
-    L = glm.vec4(light_pos_vec3.x, light_pos_vec3.y, light_pos_vec3.z, 1.0)
+    # vetor plano (A,B,C,D)
+    plane = glm.vec4(A, B, C, D)
 
-    dot_product = glm.dot(plane_coeffs, L)  # L.N
+    # luz em homogêneo (x,y,z,w)
+    L = glm.vec4(light_pos_vec3.x, light_pos_vec3.y, light_pos_vec3.z, light_w)
 
-    # construir S explicitamente (respeitando layout column-major do glm.mat4)
+    # dot = plane . L
+    dot = glm.dot(plane, L)
+
+    # Constroi S pelo formula: S = dot * I - L * plane^T
     S = glm.mat4(0.0)
-    for i in range(4):
-        for j in range(4):
-            S[i][j] = dot_product * (1.0 if i == j else 0.0) - L[i] * plane_coeffs[j]
+
+    for col in range(4):
+        for row in range(4):
+            I_cr = 1.0 if col == row else 0.0
+            S[col][row] = dot * I_cr - L[col] * plane[row]
 
     return S
+
 
 def render_shadow():
     global scene, shadow_shader, light_pos, camera
 
-    # state com camera (muitas rotinas de desenho usam o objeto State)
     st = State(camera)
 
     # Preparar GL para desenhar sombra sobre o plano:
-    glDepthMask(GL_FALSE)            # não escrever no depth buffer (deixa o plano em primeiro)
-    glDisable(GL_CULL_FACE)         # desliga culling para sombras projetadas
+    glDepthMask(GL_FALSE) # Não escrever no depth buffer
+    glDisable(GL_CULL_FACE)
     glEnable(GL_BLEND)
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
-
-    # Push/shader: empurra o shader simples para o State (se sua abstração usar Load/Unload)
-    # Caso sua classe Shader não possua Load/Unload, substitua por shadow_shader.UseProgram()
+    
     shadow_shader.Load(st)
 
-    # Matriz de projeção da sombra
+    # --- MATRIZ DE PROJEÇÃO DE SOMBRA ---
+    # Usamos o plano Y=0 (sem epsilon aqui, o epsilon está no M)
     plane_normal = glm.vec3(0.0, 1.0, 0.0)
-    plane_point = glm.vec3(0.0, 0.0, 0.0)
+    plane_point = glm.vec3(0.0, 0.0, 0.0) 
+    
     S = create_shadow_projection_matrix(plane_normal, plane_point, light_pos)
 
-    # Recupera transform do cubo: (assumo mesma estrutura que você já tinha)
+    # Usamos a matriz M correta (sem modificação)
     trf = scene.root.nodes[0].trf
     cube_mesh = scene.root.nodes[0].shps[0]
-
-    M = trf.GetMatrix()
+    M = trf.GetMatrix() 
+    
     V = camera.GetViewMatrix()
     P = camera.GetProjMatrix()
 
-    shadow_model_matrix = S * M
-    shadow_mvp_matrix = P * V * shadow_model_matrix
+    # ✅ CORREÇÃO FINAL FORÇADA: Aplicamos o epsilon push diretamente ao Model Matrix (M).
+    # Como a base do cubo está em Y=0, movemos ele um pouco para baixo antes da projeção.
+    epsilon = 0.015 # Valor mais forte para garantir que a sombra fique abaixo do chão
+    T_epsilon = glm.translate(glm.mat4(1.0), glm.vec3(0.0, -epsilon, 0.0))
 
-    # Configurar uniforme no shader ativo
+    # M_final = T_epsilon * M (Aplicar translação do epsilon à matriz do modelo)
+    M_final = T_epsilon * M
+    
+    # Mvp_sombra = P * V * S * M_final
+    shadow_model_matrix = S * M_final
+    shadow_mvp_matrix = P * V * shadow_model_matrix
+    
     current_shader = st.GetShader()
-    # Algumas implementações aceitam SetUniform diretamente com glm.mat4; caso não, converta para lista/array.
     current_shader.SetUniform("Mvp", shadow_mvp_matrix)
 
-    # Desenhar o mesh (cubo) — a implementação de Draw deve respeitar o shader atual do State
+    # Desenhar o mesh (cubo)
     cube_mesh.Draw(st)
 
     # Restaurar GL state
@@ -210,6 +221,8 @@ def render_shadow():
     glDisable(GL_BLEND)
     glDepthMask(GL_TRUE)
     glEnable(GL_CULL_FACE)
+
+
 
 def render_plane():
     global plane_shader, plane_vao, camera
@@ -219,8 +232,6 @@ def render_plane():
     mvp_matrix = vp_matrix * model_matrix
     plane_shader.SetUniform("Mvp", mvp_matrix)
 
-    # Queremos que o plano seja visível antes de projetar a sombra
-    # Se seu plane_fragment usa alpha, manter blending habilitado aqui também
     glDisable(GL_CULL_FACE)
     glBindVertexArray(plane_vao)
     glDrawArrays(GL_TRIANGLE_FAN, 0, 4)
