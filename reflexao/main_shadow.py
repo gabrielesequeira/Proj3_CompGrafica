@@ -5,6 +5,7 @@ import numpy as np
 import ctypes
 
 # Importações do seu projeto (assumo que estão implementadas)
+# Certifique-se de que todas estas classes (Camera3D, Light, Shader, etc.) estão disponíveis
 from camera3d import *
 from light import *
 from shader import *
@@ -17,7 +18,7 @@ from state import *
 
 # Posição da câmera e da luz
 viewer_pos = glm.vec3(3.0, 4.0, 5.0)
-light_pos = glm.vec3(5.0, 10.0, 5.0)  # luz acima para projetar sombra
+light_pos = glm.vec3(5.0, 10.0, 5.0)  # Posição da luz para iluminação (não afeta a projeção ortogonal da sombra)
 
 # Globais
 camera = None
@@ -87,7 +88,7 @@ def initialize_shadows(win):
     plane_shader.AttachFragmentShader("shaders/plane_fragment.glsl")
     plane_shader.Link()
 
-    # Shader simples para sombra (sem iluminação)
+    # Shader simples para sombra (sem iluminação, cor preta/cinza escura com alfa)
     shadow_shader = Shader()
     shadow_shader.AttachVertexShader("shaders/simple_vertex.glsl")
     shadow_shader.AttachFragmentShader("shaders/simple_fragment.glsl")
@@ -96,7 +97,7 @@ def initialize_shadows(win):
     # Cena: Node com transform e cubo
     transform = Transform()
     transform.Scale(0.5, 0.5, 0.5)
-    transform.Translate(-1.0, 0.5, 0.0)  # posição acima do plano y=0
+    transform.Translate(-1.0, 0.5, 0.0)  # Base do cubo em Y = 0.5 - 0.25 = 0.25
     cube = Cube()
 
     root = Node(shader, nodes=[
@@ -131,7 +132,7 @@ def display_shadows(win):
 
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
-    # 1. Renderizar o plano (chão)
+    # 1. Renderizar o plano (chão) com Depth Offset
     render_plane()
 
     # 2. Renderizar a sombra (com blending)
@@ -169,7 +170,6 @@ def create_shadow_projection_matrix(plane_normal, plane_point, light_pos_vec3, l
 
     return S
 
-
 def render_shadow():
     global scene, shadow_shader, light_pos, camera
 
@@ -184,13 +184,15 @@ def render_shadow():
     shadow_shader.Load(st)
 
     # --- MATRIZ DE PROJEÇÃO DE SOMBRA ---
-    # Usamos o plano Y=0 (sem epsilon aqui, o epsilon está no M)
     plane_normal = glm.vec3(0.0, 1.0, 0.0)
     plane_point = glm.vec3(0.0, 0.0, 0.0) 
     
-    S = create_shadow_projection_matrix(plane_normal, plane_point, light_pos)
-
-    # Usamos a matriz M correta (sem modificação)
+    # Vetor de luz direcional para projeção ortogonal (sombra exatamente abaixo)
+    shadow_light_dir = glm.vec3(0.0, 1.0, 0.0)
+    
+    # S = Matriz de Projeção Ortogonal (light_w=0.0)
+    S = create_shadow_projection_matrix(plane_normal, plane_point, shadow_light_dir, light_w=0.0) 
+    
     trf = scene.root.nodes[0].trf
     cube_mesh = scene.root.nodes[0].shps[0]
     M = trf.GetMatrix() 
@@ -198,13 +200,8 @@ def render_shadow():
     V = camera.GetViewMatrix()
     P = camera.GetProjMatrix()
 
-    # ✅ CORREÇÃO FINAL FORÇADA: Aplicamos o epsilon push diretamente ao Model Matrix (M).
-    # Como a base do cubo está em Y=0, movemos ele um pouco para baixo antes da projeção.
-    epsilon = 0.015 # Valor mais forte para garantir que a sombra fique abaixo do chão
-    T_epsilon = glm.translate(glm.mat4(1.0), glm.vec3(0.0, -epsilon, 0.0))
-
-    # M_final = T_epsilon * M (Aplicar translação do epsilon à matriz do modelo)
-    M_final = T_epsilon * M
+    # ✅ CORREÇÃO: Removemos o T_epsilon (epsilon push) para evitar o Z-fighting via GL_POLYGON_OFFSET
+    M_final = M
     
     # Mvp_sombra = P * V * S * M_final
     shadow_model_matrix = S * M_final
@@ -222,8 +219,6 @@ def render_shadow():
     glDepthMask(GL_TRUE)
     glEnable(GL_CULL_FACE)
 
-
-
 def render_plane():
     global plane_shader, plane_vao, camera
     plane_shader.UseProgram()
@@ -232,11 +227,19 @@ def render_plane():
     mvp_matrix = vp_matrix * model_matrix
     plane_shader.SetUniform("Mvp", mvp_matrix)
 
+    # 🎯 CORREÇÃO: Habilitar o Polygon Offset para empurrar o plano para trás no depth buffer
+    # Isto garante que a sombra (em Y=0) seja renderizada *na frente* do plano (também em Y=0)
+    glEnable(GL_POLYGON_OFFSET_FILL)
+    glPolygonOffset(1.0, 1.0)
+    
     glDisable(GL_CULL_FACE)
     glBindVertexArray(plane_vao)
     glDrawArrays(GL_TRIANGLE_FAN, 0, 4)
     glBindVertexArray(0)
     glEnable(GL_CULL_FACE)
+    
+    # Desabilitar o Polygon Offset
+    glDisable(GL_POLYGON_OFFSET_FILL)
 
 def render_scene():
     # Renderiza cubo com iluminação normal
